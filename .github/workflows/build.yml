@@ -1,0 +1,55 @@
+name: Build firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sketch: [DeskCycleCSC, DeskCycleFTMS]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sudo BINDIR=/usr/local/bin sh
+          arduino-cli version
+
+      - name: Install core + libraries
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "NimBLE-Arduino"
+
+      - name: Compile ${{ matrix.sketch }}
+        run: |
+          mkdir -p out
+          arduino-cli compile --fqbn esp32:esp32:esp32 \
+            --output-dir out/${{ matrix.sketch }} \
+            firmware/${{ matrix.sketch }} 2>&1 | tee compile.log
+
+      - name: Build size summary
+        if: success()
+        run: |
+          {
+            echo "### ${{ matrix.sketch }}"
+            echo '```'
+            grep -E "Sketch uses|Global variables" compile.log || true
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload firmware binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.sketch }}-esp32
+          path: out/${{ matrix.sketch }}/*.bin
+          if-no-files-found: error
